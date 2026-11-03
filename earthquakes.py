@@ -1,61 +1,93 @@
-# The Python standard library includes some functionality for communicating
-# over the Internet.
-# However, we will use a more powerful and simpler library called requests.
-# This is external library that you may need to install first.
+import json
+
 import requests
 
 
 def get_data():
-    # With requests, we can ask the web service for the data.
-    # Can you understand the parameters we are passing here?
-    response = requests.get(
-        "http://earthquake.usgs.gov/fdsnws/event/1/query.geojson",
-        params={
-            'starttime': "2000-01-01",
-            "maxlatitude": "58.723",
-            "minlatitude": "50.008",
-            "maxlongitude": "1.67",
-            "minlongitude": "-9.756",
-            "minmagnitude": "1",
-            "endtime": "2018-10-11",
-            "orderby": "time-asc"}
-    )
+    """从 USGS 下载地震数据，返回解析后的 Python 字典。"""
+    url = "https://earthquake.usgs.gov/fdsnws/event/1/query"
 
-    # The response we get back is an object with several fields.
-    # The actual contents we care about are in its text field:
-    text = response.text
-    # To understand the structure of this text, you may want to save it
-    # to a file and open it in VS Code or a browser.
-    # See the README file for more information.
-    ...
+    # 如果课程模板已提供查询参数，使用模板里的原值。
+    params = {
+        "format": "geojson",
+        "starttime": "1900-01-01",
+        "endtime": "1999-12-31T23:59:59.999",
+        "minlatitude": 49.5,
+        "maxlatitude": 61.0,
+        "minlongitude": -9.0,
+        "maxlongitude": 2.0,
+        "eventtype": "earthquake",
+    }
 
-    # We need to interpret the text to get values that we can work with.
-    # What format is the text in? How can we load the values?
-    return ...
+    # params 会被加到 URL 的查询字符串里。
+    # timeout 指定连接或读取响应时的等待上限，单位是秒。
+    response = requests.get(url, params=params, timeout=30)
 
-def count_earthquakes(data):
-    """Get the total number of earthquakes in the response."""
-    return ...
+    # 如果服务器返回 HTTP 错误，就抛出异常。
+    response.raise_for_status()
+
+    # response.text 是网页返回的 JSON 字符串。
+    # json.loads() 把字符串解析成 Python 字典。
+    return json.loads(response.text)
 
 
 def get_magnitude(earthquake):
-    """Retrive the magnitude of an earthquake item."""
-    return ...
+    """从一条地震记录中取出震级。"""
+    return earthquake["properties"]["mag"]
 
 
 def get_location(earthquake):
-    """Retrieve the latitude and longitude of an earthquake item."""
-    # There are three coordinates, but we don't care about the third (altitude)
-    return ...
+    """从一条地震记录中取出经度和纬度。"""
+    # GeoJSON 的坐标顺序是 [经度, 纬度, 深度]。
+    longitude, latitude, depth = earthquake["geometry"]["coordinates"]
+    return longitude, latitude
 
 
-def get_maximum(data):
-    """Get the magnitude and location of the strongest earthquake in the data."""
-    ...
+def get_maximum(earthquakes):
+    """返回最大震级及对应的坐标，格式为 (震级, (经度, 纬度))。"""
+    strongest = None
+    max_magnitude = None
+
+    for earthquake in earthquakes:
+        magnitude = get_magnitude(earthquake)
+
+        # 震级缺失时，跳过这条记录。
+        if magnitude is None:
+            continue
+
+        # 第一条有效记录先保存下来。
+        # 之后每遇到更大的震级，就更新最大值和对应的整条记录。
+        if max_magnitude is None or magnitude > max_magnitude:
+            max_magnitude = magnitude
+            strongest = earthquake
+
+    if strongest is None:
+        raise ValueError("查询结果中没有带有效震级的地震记录。")
+
+    # 从同一条记录取坐标，保证位置和最大震级对应。
+    return max_magnitude, get_location(strongest)
 
 
-# With all the above functions defined, we can now call them and get the result
-data = get_data()
-print(f"Loaded {count_earthquakes(data)}")
-max_magnitude, max_location = get_maximum(data)
-print(f"The strongest earthquake was at {max_location} with magnitude {max_magnitude}")
+if __name__ == "__main__":
+    # 直接运行 python earthquakes.py 时，才下载数据并打印结果。
+    # 其他脚本 import 这里的函数时，这个块不会运行。
+    data = get_data()
+    earthquakes = data["features"]
+
+    # README Step 1：查看整份响应的结构和记录数。
+    print("Top-level keys:", list(data))
+    print("Reported count:", data["metadata"]["count"])
+    print("Number of records:", len(earthquakes))
+
+    # 看第一条记录的字段，了解数据长什么样。
+    if earthquakes:
+        first = earthquakes[0]
+        print("Example magnitude:", get_magnitude(first))
+        print("Example place:", first["properties"]["place"])
+        print("Example coordinates:", first["geometry"]["coordinates"])
+        print("Example time (Unix milliseconds):", first["properties"]["time"])
+
+    # README Step 2：找出最大震级并解包坐标。
+    magnitude, (longitude, latitude) = get_maximum(earthquakes)
+    print(f"The maximum magnitude is {magnitude}.")
+    print(f"Coordinates (longitude, latitude): ({longitude}, {latitude})")
